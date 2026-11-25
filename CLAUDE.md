@@ -44,7 +44,7 @@ src/main/java/com/<패키지명>/
 
 ---
 
-## DB 테이블 목록 (11개)
+## DB 테이블 목록 (13개)
 
 | 도메인 | 테이블 | 설명 |
 |--------|--------|------|
@@ -68,7 +68,7 @@ src/main/java/com/<패키지명>/
 - **daily_question_assignments 별도 테이블**: 멱등성 + 질문/답변 도메인 분리
 - **user_id 직접 참조** (answers, notes): JOIN 없이 403 접근 제어
 - **evaluation_criteria jsonb**: 채점 기준 유연 변경
-- **concept_tag UNIQUE(user_id)**: 중복 카드 1개 보장 + UPSERT
+- **concept_tag UNIQUE(user_id, concept_tag)**: 사용자당 같은 concept_tag 카드 1개 보장 + UPSERT
 - **soft delete (deleted_at)**: 계정 복구 가능성 보존
 - **ai_usage_logs 소프트 참조**: 답변 삭제 후도 비용 로그 보존
 
@@ -76,7 +76,7 @@ src/main/java/com/<패키지명>/
 
 ## API 명세 요약
 
-**Base URL:** `https://api.anunjul.app/v1`  
+**Base URL:** `https://api.anunjul.app` (경로 버전 접두사 `/v1` 없음)  
 **인증:** `Authorization: Bearer {access_token}`  
 **날짜:** ISO 8601  
 **페이지네이션:** cursor 기반 (`?cursor=<ulid>&limit=20`, 불투명 커서)

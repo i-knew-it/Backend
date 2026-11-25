@@ -10,7 +10,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create # 초기 개발용. 서버 재시작 시 테이블 초기화됨 (이후 update/Flyway로 전환)
+      ddl-auto: validate # 스키마는 Flyway(db/migration)가 관리, Hibernate는 검증만 수행
     show-sql: true
     properties:
       hibernate:
@@ -23,6 +23,12 @@ spring:
       chat:
         options:
           model: gpt-4o-mini
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
 
 jwt:
   secret: ${JWT_SECRET:}
