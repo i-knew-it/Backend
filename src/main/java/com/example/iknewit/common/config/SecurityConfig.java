@@ -21,6 +21,7 @@ public class SecurityConfig {
 		http
 			.csrf(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(auth -> auth
+				.requestMatchers("/health").permitAll()
 				.requestMatchers(SWAGGER_PATHS).permitAll()
 				// TODO: auth 구현 시 authenticated()로 변경
 				.anyRequest().permitAll())
