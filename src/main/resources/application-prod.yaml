@@ -1,0 +1,6 @@
+# 운영 프로필: API 문서 노출 차단 (민감한 값은 환경변수로 주입)
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
