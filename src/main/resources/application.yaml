@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: iknewit
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${DB_NAME:iknewit}
+    username: ${DB_USERNAME:iknewit}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create # 초기 개발용. 서버 재시작 시 테이블 초기화됨 (이후 update/Flyway로 전환)
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          model: gpt-4o-mini
+
+jwt:
+  secret: ${JWT_SECRET:}
+  access-token-expiration: 15m
+  refresh-token-expiration: 30d
