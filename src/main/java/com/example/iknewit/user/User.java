@@ -37,8 +37,9 @@ public class User extends BaseSoftDeleteEntity {
 	@Column(name = "password_hash", length = 255)
 	private String passwordHash;
 
+	// 화면에서 사용자를 부르는 이름 (중복 허용)
 	@Column(nullable = false, length = 100)
-	private String name;
+	private String nickname;
 
 	@Enumerated(EnumType.STRING)
 	@JdbcType(PostgreSQLEnumJdbcType.class)
@@ -55,11 +56,11 @@ public class User extends BaseSoftDeleteEntity {
 	private boolean onboardingCompleted;
 
 	@Builder
-	private User(String email, String passwordHash, String name, AuthProvider provider,
+	private User(String email, String passwordHash, String nickname, AuthProvider provider,
 		String providerId, String timezone) {
 		this.email = email;
 		this.passwordHash = passwordHash;
-		this.name = name;
+		this.nickname = nickname;
 		this.provider = provider;
 		this.providerId = providerId;
 		this.timezone = timezone != null ? timezone : "Asia/Seoul";
