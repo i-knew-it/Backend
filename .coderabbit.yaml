@@ -1,0 +1,127 @@
+# .coderabbit.yaml
+language: "ko"
+
+reviews:
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # 기본 브랜치(main)가 아닌 develop 대상 PR도 자동 리뷰 (팀 Git 규칙: 작업 브랜치 → develop PR)
+  auto_review:
+    enabled: true
+    base_branches:
+      - develop
+
+  # 이 프로젝트는 도메인별 패키지(auth/, user/, answer/ ...)라 entity/, service/ 같은 폴더가 없다.
+  # 그래서 폴더가 아니라 파일 이름(*Controller, *Service, *Repository, *Scheduler)으로 매칭한다.
+  path_instructions:
+    - path: "src/main/java/**/*.java"
+      instructions: |
+        전체 공통 보안 리뷰:
+        - 로그(log.info/debug/error)에 이메일, 이름, 토큰 원문, 비밀번호 등 PII 미포함 확인
+        - 예외 메시지에 내부 구현 정보(스택 트레이스, SQL 등)가 클라이언트에 노출되지 않는지 확인
+        - Rate limiting(429)이 적절한 레이어에서 처리되는지 확인
+        - @PreAuthorize 또는 서비스 레이어에서 본인 리소스 여부 검증 확인
+        - 환경변수로 받아야 할 값이 하드코딩되어 있지 않는지 확인
+
+    # 엔티티는 파일 이름에 공통 규칙이 없어 이름을 나열한다. 새 엔티티를 만들면 여기에 추가할 것
+    - path: "src/main/java/**/{User,UserLevel,UserStreak,Question,DailyQuestionAssignment,Answer,AnswerFeedbackItem,ChatMessage,LearningNote,StudyCard,UserNotificationSetting,UserFcmToken,AiUsageLog,RefreshToken}.java"
+      instructions: |
+        JPA 엔티티 리뷰:
+        - enum 필드에 @Enumerated(STRING) + @JdbcType(PostgreSQLEnumJdbcType.class) + @Column(columnDefinition) 세트 확인
+        - char(26) PK/FK에 @JdbcTypeCode(SqlTypes.CHAR) + @Column(length = 26) 확인
+        - jsonb 필드에 @JdbcTypeCode(SqlTypes.JSON) 확인
+        - PK에 @Ulid 사용 확인
+        - setter 없이 도메인 메서드로만 상태 변경하는지 확인
+        - 테이블 컬럼에 맞는 Base 클래스 상속 확인 (created_at만: BaseCreatedEntity, +updated_at: BaseTimeEntity, +deleted_at: BaseSoftDeleteEntity)
+        - soft delete 대상(User, Answer)이 BaseSoftDeleteEntity 상속하는지 확인
+        - @NoArgsConstructor(access = PROTECTED) 있는지 확인
+
+    - path: "src/main/java/**/*Repository.java"
+      instructions: |
+        Repository 리뷰:
+        - soft delete 엔티티(User, Answer) 조회 시 DeletedAtIsNull 조건 누락 여부 확인
+        - 커스텀 쿼리의 N+1 문제 여부 확인
+        - 페이지네이션 쿼리에 커서 기반(ULID) 방식 사용하는지 확인
+        - @Modifying 쿼리에 flushAutomatically/clearAutomatically 필요 여부 확인
+
+    - path: "src/main/java/**/*Service.java"
+      instructions: |
+        Service 리뷰:
+        - @Transactional 누락 여부 (쓰기 작업)
+        - AI 호출 실패가 답변 저장·완료 처리에 영향을 주지 않는지 확인 (격리)
+        - 타계정 리소스 접근 시 403 반환하는지 확인
+        - 멱등성 보장 여부 (답변 저장, 알림 발송, 카드 생성 중복 방지)
+        - 비동기 처리 대상(학습 노트 생성, 스터디 카드 업데이트)이 @Async 또는 별도 처리로 분리됐는지 확인
+        - 예외를 던지면 롤백되는 트랜잭션에서 롤백되면 안 되는 쓰기(예: 토큰 재사용 감지 시 삭제)가 있으면 noRollbackFor 확인
+
+    - path: "src/main/java/**/*Controller.java"
+      instructions: |
+        Controller 리뷰:
+        - 인증이 필요한 엔드포인트에 @AuthenticationPrincipal 또는 인증 처리 확인
+        - 요청 DTO에 @Valid 누락 여부 확인
+        - 에러 응답 형식이 {"error": {"code": "...", "message": "..."}} 인지 확인
+        - 응답 코드: 가입은 201, 조회는 200, 삭제는 204
+        - 경로에 /v1 같은 버전 접두사를 붙이지 않았는지 확인 (팀 결정: 접두사 없음)
+        - Swagger @Tag, @Operation 추가 여부 확인
+
+    - path: "src/main/java/**/auth/**/*.java"
+      instructions: |
+        인증·보안 리뷰:
+        - JWT Access Token(30분) / Refresh Token(7일) 만료 설정 확인
+        - Refresh Token은 SHA-256 해시로 저장하는지 확인 (원문 저장 금지)
+        - Rotation 적용 여부 및 재사용 감지 로직 확인
+        - HttpOnly Secure SameSite=Strict 쿠키 속성 확인
+        - 로그인 실패 응답이 이메일 존재 여부를 노출하지 않는지 확인 (타이밍 공격 방어)
+        - 새 로그인 시 기존 Refresh Token을 모두 삭제하는지 확인 (단일 디바이스 정책)
+        - 소셜 로그인에서 email_verified 확인, 같은 이메일의 일반 계정과 자동 연동하지 않는지 확인
+        - 소셜 로그인 리다이렉트 URL에 토큰을 싣지 않는지 확인
+
+    - path: "src/main/java/**/ai/**/*.java"
+      instructions: |
+        AI 연동 리뷰:
+        - AI에 전달하는 데이터에 PII(이메일, 이름) 미포함 확인
+        - AI 호출 실패가 답변 저장·완료 처리에 영향을 주지 않는지 확인 (격리)
+        - 기능별(피드백/꼬리 질문/노트) 토큰·비용 로깅(ai_usage_logs) 확인
+        - API 키가 코드에 하드코딩되지 않고 환경변수로 주입되는지 확인
+
+    # 채팅(SSE) 코드를 sse 패키지에 둘 때 적용된다
+    - path: "src/main/java/**/sse/**/*.java"
+      instructions: |
+        SSE(실시간) 리뷰:
+        - SseEmitter 타임아웃 설정 확인
+        - 클라이언트 연결 종료 시 emitter 정리(onCompletion, onTimeout, onError) 확인
+        - 동시 연결 수 제한 또는 메모리 관리 확인
+        - AI 스트리밍 도중 예외 발생 시 emitter가 정상 종료되는지 확인
+
+    - path: "src/main/java/**/*Scheduler.java"
+      instructions: |
+        스케줄러 리뷰:
+        - 1분 주기 이탈 처리 스케줄러가 같은 답변을 중복 완료 처리하지 않는지 확인
+        - 만료된 Refresh Token 정리 스케줄러 중복 실행 방지 확인
+        - @Scheduled 작업에서 예외 발생 시 다음 실행에 영향 없는지 확인
+        - 트랜잭션 범위가 적절한지 확인
+
+    - path: "src/main/java/**/config/**/*.java"
+      instructions: |
+        설정 리뷰:
+        - CORS allowedOrigins에 * 사용 금지 (쿠키 인증은 명시적 origin 필수)
+        - Swagger가 운영 프로필에서 비활성화되는지 확인
+        - 환경변수로 받아야 할 값이 하드코딩되어 있지 않는지 확인
+
+    - path: "src/main/resources/db/migration/**/*.sql"
+      instructions: |
+        Flyway 마이그레이션 리뷰:
+        - 이미 적용된(머지된) 마이그레이션 파일은 절대 수정 금지 (체크섬 검사로 기동 실패). 변경은 다음 번호의 새 파일로 추가
+        - 부분 인덱스, FK, UNIQUE 제약 누락 여부 확인
+        - DEFAULT now() 누락 여부 확인
+        - soft delete 대상 테이블에 deleted_at 컬럼 확인
+        - 이름을 바꾸거나 컬럼을 삭제하는 변경은 기존 데이터·엔티티 영향 확인
+
+    - path: "src/test/**/*.java"
+      instructions: |
+        테스트 리뷰:
+        - 핵심 비즈니스 로직(인증, 멱등성, 접근 제어)에 테스트 커버리지 확인
+        - @Transactional 롤백으로 DB 잔여 데이터가 없는지 확인
+        - 경계값(10자 미만 답변, 오늘 중복 제출 등) 테스트 여부 확인
