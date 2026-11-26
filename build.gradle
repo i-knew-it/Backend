@@ -33,6 +33,11 @@ dependencies {
 	// Spring AI (OpenAI)
 	implementation 'org.springframework.ai:spring-ai-starter-model-openai'
 
+	// 소셜 로그인 (Google OAuth2). Boot 4에서 스타터 이름이 security-oauth2-client로 변경됨
+	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
+	// 로그인 시도 제한용 인메모리 캐시 (버전은 Boot 관리)
+	implementation 'com.github.ben-manes.caffeine:caffeine'
+
 	// API 문서 (Swagger UI). springdoc 3.x가 Spring Boot 4 대응
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.2.1'
 

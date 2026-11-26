@@ -44,13 +44,14 @@ src/main/java/com/<패키지명>/
 
 ---
 
-## DB 테이블 목록 (13개)
+## DB 테이블 목록 (14개)
 
 | 도메인 | 테이블 | 설명 |
 |--------|--------|------|
 | 사용자 | users | 계정 기본 정보 |
 | 사용자 | user_levels | 분야·수준 (1:N) |
 | 사용자 | user_streaks | 연속 학습 (1:1) |
+| 인증 | refresh_tokens | Refresh Token 해시 (사용자당 1개 디바이스, Rotation) |
 | 질문 | questions | 질문 풀 |
 | 질문 | daily_question_assignments | 날짜별 배정 (멱등성 보장) |
 | 답변 | answers | 답변 원문 + 상태 (`feedback_viewed_at` 컬럼 포함) |
@@ -83,8 +84,11 @@ src/main/java/com/<패키지명>/
 
 ### Access Token
 - 저장: JS 메모리 (프론트)
-- 만료: **15분**
-- Refresh Token: HttpOnly Secure 쿠키, 만료 **30일**
+- 만료: **30분**
+- Refresh Token: HttpOnly Secure SameSite=Strict 쿠키(Path=/auth), 만료 **7일**. DB에는 SHA-256 해시만 저장
+- **단일 디바이스 로그인**: 새 로그인(가입·이메일·소셜)이 성공하면 해당 사용자의 기존 Refresh Token을 모두 삭제한다. 이전 기기는 Access Token이 만료되어 갱신을 시도할 때(최대 30분 뒤) 로그아웃된다
+- **Rotation**: 갱신 때마다 Refresh Token 교체. 폐기된 토큰이 재사용되면 탈취로 보고 사용자 전체 토큰 삭제. 단, 교체 직후 10초 안의 재사용은 동시 요청(여러 탭 등)으로 보고 허용
+- 갱신 실패(TOKEN_EXPIRED/TOKEN_INVALID) 시 서버가 Refresh 쿠키를 만료(Max-Age=0)시킨다. 만료된 토큰 행은 매일 03:00(KST) 스케줄러가 삭제
 
 ### 엔드포인트
 
@@ -92,7 +96,8 @@ src/main/java/com/<패키지명>/
 # 인증
 POST   /auth/signup
 POST   /auth/login
-POST   /auth/social
+GET    /auth/oauth2/authorize/{provider}   # 소셜 로그인 시작 (현재 google만, 카카오 예정)
+GET    /auth/oauth2/callback/{provider}    # 소셜 로그인 콜백 (Google이 호출, 프론트가 직접 호출하지 않음)
 POST   /auth/token/refresh
 POST   /auth/logout
 POST   /auth/verify-email
@@ -150,11 +155,19 @@ GET    /admin/ai-usage
 |------|------|------|
 | 400 | VALIDATION_ERROR | 요청 파라미터 오류 |
 | 400 | ANSWER_TOO_SHORT | 답변 10자 미만 |
-| 401 | TOKEN_EXPIRED | Access Token 만료 |
+| 401 | TOKEN_EXPIRED | Access/Refresh Token 만료 |
+| 401 | TOKEN_INVALID | 위조·형식 오류·용도 불일치·폐기된 토큰 |
+| 401 | INVALID_CREDENTIALS | 이메일 없음 또는 비밀번호 불일치 |
+| 401 | UNAUTHORIZED | 토큰 없이 인증 필요 경로 접근 |
+| 429 | TOO_MANY_REQUESTS | 로그인 연속 실패(5회) 또는 IP당 분당 20회 초과. `Retry-After` 헤더(초) 제공 |
 | 403 | FORBIDDEN | 타계정 리소스 접근 |
 | 409 | EMAIL_ALREADY_EXISTS | 이메일 중복 |
 | 409 | ALREADY_ANSWERED_TODAY | 오늘 이미 제출 |
 | 422 | AI_ANALYSIS_FAILED | AI 분석 실패 (답변은 보존) |
+
+에러 응답 형식: `{ "error": { "code": "ERROR_CODE", "message": "사용자에게 보여줄 메시지" } }`
+
+소셜 로그인 실패는 JSON이 아니라 프론트 `/login?error=코드`로 리다이렉트하며, 코드는 `EMAIL_ALREADY_EXISTS`(같은 이메일의 일반 계정 존재, 자동 연동 안 함), `EMAIL_NOT_VERIFIED`(이메일 미인증 소셜 계정), `OAUTH_FAILED`(취소·기타 실패) 중 하나다.
 
 ---
 
@@ -179,12 +192,18 @@ GET    /admin/ai-usage
 | 학습 완료 이탈 처리 | 세션 기반. `feedback_viewed_at` 저장 + 1분 주기 스케줄러 |
 | 타임존 | 온보딩 때 저장, 설정에서 변경 가능 |
 | 커서 페이지네이션 | 불투명 커서 (ULID 그대로, 프론트는 의미 해석 안 함) |
+| 소셜 로그인 | 프론트가 `GET /auth/oauth2/authorize/google`로 이동 → 성공 시 서버가 Refresh 쿠키만 세팅하고 `{FRONTEND_URL}/auth/callback`으로 리다이렉트(토큰은 URL에 싣지 않음) → 프론트가 `POST /auth/token/refresh`로 Access Token 수령. 실패 시 `{FRONTEND_URL}/login?error=코드` |
+| 회원가입 | 이메일·비밀번호·비밀번호 확인·닉네임. 닉네임 2~20자(한글·영문·숫자·`_`), 중복 허용. 비밀번호 8~72자, 영문 대·소문자·숫자·특수문자 각 1개 이상, 공백 불가 |
+| 쿠키 인증 | 프론트 요청에 `credentials: 'include'` 필요. SameSite=Strict라 프론트와 API는 같은 사이트(예: app.도메인, api.도메인)여야 함. CORS 허용 origin은 환경변수 `FRONTEND_URL` |
 
 ---
 
 ## 보안 규칙
 
 - 비밀번호: bcrypt 해시 저장
+- 무차별 대입 방어: 같은 이메일+IP 로그인 5회 연속 실패 시 15분 차단, IP당 분당 20회 제한(로그인·가입 합산). 서버 메모리 기반이라 재시작 시 초기화되고 서버를 여러 대로 늘리면 Redis 등으로 교체 필요. Nginx 뒤에서는 실제 클라이언트 IP를 받도록 `server.forward-headers-strategy` 설정 필요
+- 로그인 실패 응답은 이메일 존재 여부와 무관하게 동일(INVALID_CREDENTIALS)
+- 소셜 로그인은 이메일이 인증된(email_verified) 계정만 허용하고, 같은 이메일의 일반 계정과 자동 연동하지 않는다
 - Refresh Token: HttpOnly Secure 쿠키
 - HTTPS 필수
 - 모든 개인 데이터 엔드포인트: 인증된 본인만 접근. 미인증/타계정 → 401/403

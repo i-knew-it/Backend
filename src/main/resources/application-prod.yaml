@@ -1,6 +1,15 @@
-# 운영 프로필: API 문서 노출 차단 (민감한 값은 환경변수로 주입)
+# 운영 프로필 (민감한 값은 환경변수로 주입)
+
+# API 문서 노출 차단
 springdoc:
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
+
+# 소셜 로그인 핸드셰이크용 세션 쿠키는 HTTPS에서만 전송
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
