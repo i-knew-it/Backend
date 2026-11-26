@@ -11,6 +11,66 @@
 
 ---
 
+## Git 규칙 (브랜치·커밋·PR)
+
+프론트엔드·백엔드가 같은 형식으로 작성하기 위한 팀 규칙. Claude가 git 명령어나 커밋 메시지, PR 본문을 안내할 때 항상 이 규칙을 따른다.
+
+### 브랜치 전략
+
+- `main`: 운영 배포 브랜치. 직접 커밋하지 않음
+- `develop`: 개발 통합 브랜치. **모든 작업 브랜치는 여기서 따고 여기로 PR**
+- 작업 브랜치: `타입/작업명` (예: `feat/auth`, `chore/coderabbit`)
+
+흐름: `작업 브랜치` → PR → `develop` → 배포 시점에 `main`
+
+### 타입
+
+| 타입 | 용도 |
+| --- | --- |
+| feat | 새 기능 |
+| fix | 버그 수정 |
+| refactor | 동작 변경 없는 코드 개선 |
+| style | UI, 스타일 변경 |
+| chore | 설정, 패키지, 빌드 등 |
+| docs | 문서 |
+
+### 커밋 메시지
+
+```
+타입: 무엇을 했는지
+```
+
+예: `feat: Zustand 인증 상태 저장소 도입` (한국어로 작성, 코드 식별자·기술 용어는 원문 유지)
+
+### PR
+
+- **제목**: 커밋 메시지와 같은 형식. 예: `feat: 이메일 로그인 및 토큰 재발급 구현`
+- **base 브랜치**: `develop` (GitHub 기본값이 `main`이면 직접 바꿀 것)
+- **라벨**: 제목의 타입과 같은 이름의 라벨을 붙임 (`feat`, `fix`, `refactor`, `style`, `chore`, `docs`)
+- **설명**:
+
+```markdown
+## 작업 내용
+-
+
+## 관련 일정
+노션 Schedule 링크
+
+## 참고 사항
+(선택) 리뷰 시 봐줬으면 하는 부분, 스크린샷 등
+```
+
+### 리뷰
+
+- CodeRabbit이 `develop` 대상 PR을 자동 리뷰함 (Frontend 저장소)
+
+### Claude 작업 시 유의
+
+- 커밋·푸시·PR 생성은 사용자가 직접 한다. Claude는 명령어와 PR 본문 초안만 안내한다.
+- PR 본문 초안의 "관련 일정"은 노션 링크를 Claude가 알 수 없으므로 비워 둔다.
+
+---
+
 ## 기술 스택
 
 | 항목 | 선택 |
@@ -192,7 +252,7 @@ GET    /admin/ai-usage
 | 학습 완료 이탈 처리 | 세션 기반. `feedback_viewed_at` 저장 + 1분 주기 스케줄러 |
 | 타임존 | 온보딩 때 저장, 설정에서 변경 가능 |
 | 커서 페이지네이션 | 불투명 커서 (ULID 그대로, 프론트는 의미 해석 안 함) |
-| 소셜 로그인 | 프론트가 `GET /auth/oauth2/authorize/google`로 이동 → 성공 시 서버가 Refresh 쿠키만 세팅하고 `{FRONTEND_URL}/auth/callback`으로 리다이렉트(토큰은 URL에 싣지 않음) → 프론트가 `POST /auth/token/refresh`로 Access Token 수령. 실패 시 `{FRONTEND_URL}/login?error=코드` |
+| 소셜 로그인 | 프론트가 `GET /auth/oauth2/authorize/google`로 이동 → 성공 시 서버가 Refresh 쿠키만 세팅하고 `{FRONTEND_URL}/auth/callback`으로 리다이렉트(토큰은 URL에 싣지 않음) → 프론트가 `POST /auth/token/refresh`로 Access Token 수령 → `GET /users/me`로 사용자 정보 조회(새로고침 후 복구도 같은 순서: refresh → me). 실패 시 `{FRONTEND_URL}/login?error=코드` |
 | 회원가입 | 이메일·비밀번호·비밀번호 확인·닉네임. 닉네임 2~20자(한글·영문·숫자·`_`), 중복 허용. 비밀번호 8~72자, 영문 대·소문자·숫자·특수문자 각 1개 이상, 공백 불가 |
 | 쿠키 인증 | 프론트 요청에 `credentials: 'include'` 필요. SameSite=Strict라 프론트와 API는 같은 사이트(예: app.도메인, api.도메인)여야 함. CORS 허용 origin은 환경변수 `FRONTEND_URL` |
 

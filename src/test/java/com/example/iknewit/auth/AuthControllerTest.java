@@ -445,9 +445,10 @@ class AuthControllerTest {
 	void 유효한_액세스_토큰이면_보안_필터를_통과한다() throws Exception {
 		String accessToken = accessTokenOf(signup(uniqueEmail()));
 
-		// /users/me 컨트롤러는 아직 없으므로 401이 아니라 404면 인증은 통과한 것
-		mockMvc.perform(get("/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+		// 존재하지 않는 경로라서 401이 아니라 404면 인증은 통과한 것 (실제 API 응답은 UserControllerTest에서 검증)
+		mockMvc.perform(get("/no-such-protected-path").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
 			.andExpect(status().isNotFound());
+		mockMvc.perform(get("/no-such-protected-path")).andExpect(status().isUnauthorized());
 	}
 
 	@Test
