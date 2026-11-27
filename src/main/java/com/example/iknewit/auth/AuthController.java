@@ -1,7 +1,9 @@
 package com.example.iknewit.auth;
 
 import com.example.iknewit.auth.dto.AuthResponse;
+import com.example.iknewit.auth.dto.ForgotPasswordRequest;
 import com.example.iknewit.auth.dto.LoginRequest;
+import com.example.iknewit.auth.dto.ResetPasswordRequest;
 import com.example.iknewit.auth.dto.SignupRequest;
 import com.example.iknewit.auth.dto.TokenResponse;
 import com.example.iknewit.common.exception.ApiException;
@@ -30,10 +32,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
 	private final AuthService authService;
+	private final PasswordResetService passwordResetService;
 	private final RefreshCookieFactory cookieFactory;
 
-	public AuthController(AuthService authService, RefreshCookieFactory cookieFactory) {
+	public AuthController(AuthService authService, PasswordResetService passwordResetService,
+		RefreshCookieFactory cookieFactory) {
 		this.authService = authService;
+		this.passwordResetService = passwordResetService;
 		this.cookieFactory = cookieFactory;
 	}
 
@@ -92,6 +97,33 @@ public class AuthController {
 		return ResponseEntity.ok()
 			.header(HttpHeaders.SET_COOKIE, cookieFactory.expire().toString())
 			.build();
+	}
+
+	@Operation(summary = "비밀번호 재설정 메일 요청",
+		description = "이메일 로그인 계정이면 재설정 링크가 담긴 메일을 보냅니다(링크 30분 유효, 1회용). "
+			+ "**가입된 이메일인지와 상관없이 항상 같은 200 응답**을 주므로, 화면에는 \"가입된 이메일이라면 안내 메일을 보냈습니다\"처럼 안내하세요. "
+			+ "Google로만 가입한 계정에는 메일을 보내지 않습니다. 같은 이메일은 1시간에 3회까지 요청할 수 있습니다.")
+	@ApiResponse(responseCode = "200", description = "요청 접수 (메일 발송 여부는 알려주지 않음)")
+	@ApiResponse(responseCode = "400", description = "VALIDATION_ERROR: 이메일 형식 오류")
+	@ApiResponse(responseCode = "429", description = "TOO_MANY_REQUESTS: 같은 이메일 1시간 3회 또는 같은 IP 분당 20회 초과 (Retry-After 헤더)")
+	@PostMapping("/password/forgot")
+	public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request,
+		HttpServletRequest http) {
+		passwordResetService.requestReset(request, http.getRemoteAddr());
+		return ResponseEntity.ok().build();
+	}
+
+	@Operation(summary = "비밀번호 재설정",
+		description = "메일 링크의 token으로 새 비밀번호를 설정합니다. 성공하면 모든 기기에서 로그아웃되므로 새 비밀번호로 다시 로그인해야 합니다. "
+			+ "비밀번호 규칙은 가입과 같습니다.")
+	@ApiResponse(responseCode = "200", description = "비밀번호 변경 완료")
+	@ApiResponse(responseCode = "400", description = "VALIDATION_ERROR(비밀번호 규칙, 확인 불일치) 또는 INVALID_RESET_TOKEN(만료, 이미 사용, 없는 토큰)")
+	@ApiResponse(responseCode = "429", description = "TOO_MANY_REQUESTS: 같은 IP 분당 20회 초과")
+	@PostMapping("/password/reset")
+	public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request,
+		HttpServletRequest http) {
+		passwordResetService.resetPassword(request, http.getRemoteAddr());
+		return ResponseEntity.ok().build();
 	}
 
 	private ResponseEntity<AuthResponse> withRefreshCookie(HttpStatus status, AuthResult result) {

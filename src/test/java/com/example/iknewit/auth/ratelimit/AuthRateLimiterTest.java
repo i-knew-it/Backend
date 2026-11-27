@@ -43,7 +43,7 @@ class AuthRateLimiterTest {
 
 	private final MutableClock clock = new MutableClock();
 	private final AuthRateLimiter limiter = new AuthRateLimiter(
-		new RateLimitProperties(5, Duration.ofMinutes(15), 20), clock);
+		new RateLimitProperties(5, Duration.ofMinutes(15), 20, 3, Duration.ofHours(1)), clock);
 
 	private void fail(int times) {
 		for (int i = 0; i < times; i++) {
@@ -144,5 +144,53 @@ class AuthRateLimiterTest {
 		clock.advance(Duration.ofSeconds(61));
 
 		assertThatCode(() -> limiter.checkIp(IP)).doesNotThrowAnyException();
+	}
+
+	// ---------- 비밀번호 재설정 요청 제한 (이메일당) ----------
+
+	@Test
+	void 같은_이메일의_재설정_요청은_1시간에_3회까지_허용한다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		assertThatThrownBy(() -> limiter.checkPasswordResetRequest(EMAIL))
+			.isInstanceOfSatisfying(ApiException.class, e -> {
+				assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TOO_MANY_REQUESTS);
+				assertThat(e.getRetryAfterSeconds()).isEqualTo(3600L);
+			});
+	}
+
+	@Test
+	void 재설정_요청_횟수는_이메일_대소문자와_공백을_무시하고_센다() {
+		limiter.checkPasswordResetRequest("user@example.com");
+		limiter.checkPasswordResetRequest("USER@example.com");
+		limiter.checkPasswordResetRequest("  User@Example.com ");
+
+		assertThatThrownBy(() -> limiter.checkPasswordResetRequest(EMAIL)).isInstanceOf(ApiException.class);
+	}
+
+	@Test
+	void 다른_이메일의_재설정_요청은_영향을_받지_않는다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		assertThatCode(() -> limiter.checkPasswordResetRequest("other@example.com")).doesNotThrowAnyException();
+	}
+
+	@Test
+	void 재설정_요청_횟수는_1시간이_지나면_초기화된다() {
+		for (int i = 0; i < 4; i++) {
+			try {
+				limiter.checkPasswordResetRequest(EMAIL);
+			} catch (ApiException ignored) {
+				// 4번째는 차단되는 것이 정상
+			}
+		}
+
+		clock.advance(Duration.ofHours(1).plusSeconds(1));
+
+		assertThatCode(() -> limiter.checkPasswordResetRequest(EMAIL)).doesNotThrowAnyException();
 	}
 }

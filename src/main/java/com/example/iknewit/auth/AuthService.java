@@ -14,7 +14,6 @@ import com.example.iknewit.user.AuthProvider;
 import com.example.iknewit.user.Emails;
 import com.example.iknewit.user.User;
 import com.example.iknewit.user.UserRepository;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -23,8 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
-
-	private static final int BCRYPT_MAX_BYTES = 72;
 
 	private final UserRepository userRepository;
 	private final RefreshTokenRepository refreshTokenRepository;
@@ -50,13 +47,8 @@ public class AuthService {
 	@Transactional
 	public AuthResult signup(SignupRequest request, String clientIp) {
 		rateLimiter.checkIp(clientIp);
-		if (!request.password().equals(request.passwordConfirm())) {
-			throw new ApiException(ErrorCode.VALIDATION_ERROR, "비밀번호가 일치하지 않습니다.");
-		}
-		// bcrypt는 72바이트까지만 반영하므로(한글은 글자당 3바이트) 바이트 기준으로도 검증
-		if (request.password().getBytes(StandardCharsets.UTF_8).length > BCRYPT_MAX_BYTES) {
-			throw new ApiException(ErrorCode.VALIDATION_ERROR, "비밀번호가 너무 깁니다. 72바이트 이하로 입력해주세요.");
-		}
+		PasswordPolicy.requireConfirmed(request.password(), request.passwordConfirm());
+		PasswordPolicy.requireWithinBcryptLimit(request.password());
 		String email = Emails.normalize(request.email());
 		if (userRepository.existsByEmailAndDeletedAtIsNull(email)) {
 			throw new ApiException(ErrorCode.EMAIL_ALREADY_EXISTS);

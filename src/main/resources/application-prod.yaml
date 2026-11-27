@@ -13,3 +13,11 @@ server:
     session:
       cookie:
         secure: true
+
+# 메일: AWS SES SMTP 등 인증이 필요한 서버를 가정 (MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM은 환경변수)
+spring:
+  mail:
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true

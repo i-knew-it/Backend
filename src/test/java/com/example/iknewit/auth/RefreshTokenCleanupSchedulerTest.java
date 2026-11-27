@@ -32,6 +32,26 @@ class RefreshTokenCleanupSchedulerTest {
 			.build());
 	}
 
+	@Autowired
+	PasswordResetTokenRepository passwordResetTokenRepository;
+
+	@Test
+	void 만료된_비밀번호_재설정_토큰도_삭제하고_유효한_토큰은_남긴다() {
+		User user = userRepository.saveAndFlush(User.builder().email("cleanup-" + UUID.randomUUID() + "@example.com")
+			.passwordHash("{bcrypt}x").nickname("정리테스트").provider(AuthProvider.EMAIL).build());
+		PasswordResetToken expired = passwordResetTokenRepository.saveAndFlush(PasswordResetToken.builder()
+			.userId(user.getId()).tokenHash(TokenHasher.sha256(UUID.randomUUID().toString()))
+			.expiresAt(Instant.now().minus(Duration.ofHours(1))).build());
+		PasswordResetToken valid = passwordResetTokenRepository.saveAndFlush(PasswordResetToken.builder()
+			.userId(user.getId()).tokenHash(TokenHasher.sha256(UUID.randomUUID().toString()))
+			.expiresAt(Instant.now().plus(Duration.ofMinutes(10))).build());
+
+		scheduler.cleanUp();
+
+		assertThat(passwordResetTokenRepository.findById(expired.getId())).isEmpty();
+		assertThat(passwordResetTokenRepository.findById(valid.getId())).isPresent();
+	}
+
 	@Test
 	void 만료된_행만_삭제하고_유효한_행은_남긴다() {
 		User user = userRepository.saveAndFlush(User.builder().email("cleanup-" + UUID.randomUUID() + "@example.com")

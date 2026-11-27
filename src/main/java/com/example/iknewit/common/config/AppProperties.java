@@ -10,7 +10,11 @@ public record AppProperties(
 	// 쉼표로 여러 origin 가능 (CORS 허용 목록)
 	String frontendUrl,
 	@DefaultValue("/auth/callback") String oauth2SuccessPath,
-	@DefaultValue("/login") String oauth2FailurePath
+	@DefaultValue("/login") String oauth2FailurePath,
+	// 비밀번호 재설정 메일 링크: {frontend}{경로}?token=...
+	@DefaultValue("/reset-password") String passwordResetPath,
+	// 메일 발신 주소 (운영에서는 SES에서 인증된 주소여야 함)
+	@DefaultValue("no-reply@anunjul.app") String mailFrom
 ) {
 
 	// 끝의 슬래시는 CORS 정확 일치 비교와 URL 조합을 깨뜨리므로 제거
