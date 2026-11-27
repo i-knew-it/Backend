@@ -55,6 +55,11 @@ public class User extends BaseSoftDeleteEntity {
 	@Column(name = "onboarding_completed", nullable = false)
 	private boolean onboardingCompleted;
 
+	// 비밀번호 재설정 등으로 비밀번호 해시를 바꾼다 (setter 대신 도메인 메서드)
+	public void changePasswordHash(String passwordHash) {
+		this.passwordHash = passwordHash;
+	}
+
 	@Builder
 	private User(String email, String passwordHash, String nickname, AuthProvider provider,
 		String providerId, String timezone) {

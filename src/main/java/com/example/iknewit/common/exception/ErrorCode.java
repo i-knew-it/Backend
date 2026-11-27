@@ -15,6 +15,8 @@ public enum ErrorCode {
 	UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다."),
 	FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
 	TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+	// 만료·이미 사용됨·존재하지 않음을 구분하지 않는다 (토큰 추측 단서를 주지 않기 위해)
+	INVALID_RESET_TOKEN(HttpStatus.BAD_REQUEST, "재설정 링크가 만료되었거나 이미 사용되었습니다. 다시 요청해주세요."),
 	// 소셜 로그인 (프론트로 리다이렉트할 때 error 쿼리 값으로 사용)
 	EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "인증되지 않은 이메일 계정은 사용할 수 없습니다."),
 	OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다. 다시 시도해주세요.");

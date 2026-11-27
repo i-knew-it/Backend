@@ -35,6 +35,7 @@ public class AuthRateLimiter {
 	private final Clock clock;
 	private final Cache<String, FailureRecord> failures;
 	private final Cache<String, AtomicInteger> ipCounters;
+	private final Cache<String, AtomicInteger> passwordResetCounters;
 
 	@Autowired
 	public AuthRateLimiter(RateLimitProperties properties) {
@@ -52,6 +53,9 @@ public class AuthRateLimiter {
 		// 첫 요청 시각부터 1분간 집계하는 고정 윈도우
 		this.ipCounters = Caffeine.newBuilder().ticker(ticker)
 			.expireAfterWrite(Duration.ofMinutes(1)).maximumSize(MAX_ENTRIES).build();
+		// 이메일별 재설정 요청 횟수 (첫 요청 시각부터 고정 윈도우)
+		this.passwordResetCounters = Caffeine.newBuilder().ticker(ticker)
+			.expireAfterWrite(properties.passwordResetWindow()).maximumSize(MAX_ENTRIES).build();
 	}
 
 	public void checkIp(String ip) {
@@ -59,6 +63,20 @@ public class AuthRateLimiter {
 		if (count > properties.ipMaxPerMinute()) {
 			throw new ApiException(ErrorCode.TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_REQUESTS.getMessage(),
 				IP_WINDOW_RETRY_SECONDS);
+		}
+	}
+
+	/**
+	 * 같은 이메일로 비밀번호 재설정 메일을 너무 자주 요청하지 못하게 한다 (메일 폭탄 방지).
+	 * 이메일이 가입되어 있는지와 무관하게 똑같이 센다. 가입된 이메일에만 제한이 걸리면
+	 * 429 여부로 가입 여부를 알아낼 수 있기 때문이다.
+	 */
+	public void checkPasswordResetRequest(String email) {
+		int count = passwordResetCounters.get(Emails.normalize(email), key -> new AtomicInteger()).incrementAndGet();
+		if (count > properties.passwordResetMaxPerHour()) {
+			long seconds = properties.passwordResetWindow().toSeconds();
+			throw new ApiException(ErrorCode.TOO_MANY_REQUESTS,
+				"재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.", seconds);
 		}
 	}
 

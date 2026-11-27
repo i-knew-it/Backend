@@ -26,7 +26,7 @@ reviews:
         - 환경변수로 받아야 할 값이 하드코딩되어 있지 않는지 확인
 
     # 엔티티는 파일 이름에 공통 규칙이 없어 이름을 나열한다. 새 엔티티를 만들면 여기에 추가할 것
-    - path: "src/main/java/**/{User,UserLevel,UserStreak,Question,DailyQuestionAssignment,Answer,AnswerFeedbackItem,ChatMessage,LearningNote,StudyCard,UserNotificationSetting,UserFcmToken,AiUsageLog,RefreshToken}.java"
+    - path: "src/main/java/**/{User,UserLevel,UserStreak,Question,DailyQuestionAssignment,Answer,AnswerFeedbackItem,ChatMessage,LearningNote,StudyCard,UserNotificationSetting,UserFcmToken,AiUsageLog,RefreshToken,PasswordResetToken}.java"
       instructions: |
         JPA 엔티티 리뷰:
         - enum 필드에 @Enumerated(STRING) + @JdbcType(PostgreSQLEnumJdbcType.class) + @Column(columnDefinition) 세트 확인

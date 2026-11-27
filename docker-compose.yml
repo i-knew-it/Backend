@@ -11,5 +11,14 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  # 로컬 개발용 가짜 메일 서버: 앱이 보낸 메일을 실제로 발송하지 않고 받아서 웹 화면에 보여 준다
+  # SMTP 1025, 웹 화면 http://localhost:8025 (이 PC에서만 접근되도록 127.0.0.1에 바인딩)
+  mailpit:
+    image: axllent/mailpit
+    container_name: iknewit-mailpit
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
 volumes:
   postgres-data:

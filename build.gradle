@@ -35,6 +35,8 @@ dependencies {
 
 	// 소셜 로그인 (Google OAuth2). Boot 4에서 스타터 이름이 security-oauth2-client로 변경됨
 	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
+	// 메일 발송 (SMTP). 로컬은 Mailpit, 운영은 환경변수만 바꿔 AWS SES SMTP로 연결
+	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	// 로그인 시도 제한용 인메모리 캐시 (버전은 Boot 관리)
 	implementation 'com.github.ben-manes.caffeine:caffeine'
 
