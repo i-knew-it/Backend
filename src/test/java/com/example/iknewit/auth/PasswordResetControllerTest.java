@@ -1,10 +1,12 @@
 package com.example.iknewit.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.example.iknewit.auth.dto.LoginRequest;
 import com.example.iknewit.common.exception.ApiException;
+import com.example.iknewit.common.exception.ErrorCode;
 import com.example.iknewit.user.AuthProvider;
 import com.example.iknewit.user.User;
 import com.example.iknewit.user.UserRepository;
@@ -89,6 +91,11 @@ class PasswordResetControllerTest {
 	private String lastToken() {
 		List<PasswordResetRequested> all = requestedEvents();
 		return all.get(all.size() - 1).token();
+	}
+
+	private long refreshTokenRowsOf(String userId) {
+		return (Long) em.createQuery("select count(r) from RefreshToken r where r.userId = :userId")
+			.setParameter("userId", userId).getSingleResult();
 	}
 
 	private long tokenRowsOf(String userId) {
@@ -226,18 +233,22 @@ class PasswordResetControllerTest {
 	@Test
 	void 재설정하면_새_비밀번호로만_로그인되고_모든_기기가_로그아웃된다() throws Exception {
 		String email = uniqueEmail();
-		createEmailUser(email);
+		User user = createEmailUser(email);
 		AuthResult existingSession = authService.login(new LoginRequest(email, OLD_PASSWORD), "10.4.0.1");
+		assertThat(refreshTokenRowsOf(user.getId())).isEqualTo(1); // 재설정 전에는 기존 세션이 살아 있다
 		forgot(email);
 
 		MvcResult result = reset(lastToken(), NEW_PASSWORD, NEW_PASSWORD);
 
 		assertThat(result.getResponse().getStatus()).isEqualTo(200);
+		// 새 로그인보다 먼저 확인해야 한다. 로그인하면 단일 디바이스 정책으로 기존 토큰이 어차피 지워져서,
+		// 그 뒤에 확인하면 재설정이 토큰을 지우지 않아도 통과해 버린다
+		assertThat(refreshTokenRowsOf(user.getId())).isZero();
+		assertThatThrownBy(() -> authService.refresh(existingSession.refreshToken()))
+			.isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TOKEN_INVALID));
 		assertThat(loginStatus(email, NEW_PASSWORD)).isEqualTo(200);
 		assertThat(loginStatus(email, OLD_PASSWORD)).isEqualTo(401);
-		// 재설정 전에 로그인해 둔 기기의 Refresh Token은 더 이상 쓸 수 없다
-		org.assertj.core.api.Assertions.assertThatThrownBy(() -> authService.refresh(existingSession.refreshToken()))
-			.isInstanceOf(ApiException.class);
 	}
 
 	@Test

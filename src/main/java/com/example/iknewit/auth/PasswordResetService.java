@@ -57,7 +57,10 @@ public class PasswordResetService {
 		// 가입 여부와 무관하게 센다 (429 여부로 가입 여부가 드러나지 않도록)
 		rateLimiter.checkPasswordResetRequest(email);
 
-		userRepository.findByEmailAndDeletedAtIsNull(email)
+		// 사용자 행을 잠그고 조회한다. 같은 사용자의 요청이 동시에 오면 한 번에 하나씩 처리되어,
+		// "기존 토큰 삭제 → 새 토큰 저장"이 뒤섞여 유효한 토큰이 여러 개 남는 일이 없다.
+		// (UNIQUE 제약으로 막으면 두 번째 요청이 가입된 이메일에서만 오류가 나서 가입 여부가 드러난다)
+		userRepository.findByEmailForUpdate(email)
 			.filter(user -> user.getProvider() == AuthProvider.EMAIL && user.getPasswordHash() != null)
 			.ifPresent(this::issueToken);
 	}
@@ -75,11 +78,17 @@ public class PasswordResetService {
 		String tokenHash = TokenHasher.sha256(request.token());
 		PasswordResetToken stored = tokenRepository.findByTokenHash(tokenHash)
 			.orElseThrow(() -> new ApiException(ErrorCode.INVALID_RESET_TOKEN));
-		// 사용·만료 여부 확인과 사용 처리를 한 번의 UPDATE로 해서 같은 토큰의 동시 사용을 막는다
+		// 1) 사용자 행을 먼저 잠근다. requestReset과 같은 순서("사용자 → 토큰")로 잠가야
+		//    두 요청이 서로를 기다리는 교착(deadlock)이 생기지 않는다. 탈퇴한 계정이면 여기서 거절된다
+		userRepository.findByIdForUpdate(stored.getUserId())
+			.orElseThrow(() -> new ApiException(ErrorCode.INVALID_RESET_TOKEN));
+		// 2) 사용·만료 여부 확인과 사용 처리를 한 번의 UPDATE로 해서 같은 토큰의 동시 사용을 막는다
 		if (tokenRepository.markUsed(tokenHash, Instant.now()) == 0) {
 			throw new ApiException(ErrorCode.INVALID_RESET_TOKEN);
 		}
 
+		// 3) markUsed가 영속성 컨텍스트를 비우므로(clearAutomatically) 사용자를 다시 조회해서 변경한다.
+		//    같은 트랜잭션에서 이미 잠근 행이라 추가로 기다리지 않는다
 		User user = userRepository.findByIdAndDeletedAtIsNull(stored.getUserId())
 			.orElseThrow(() -> new ApiException(ErrorCode.INVALID_RESET_TOKEN));
 		user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
