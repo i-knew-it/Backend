@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.iknewit.auth.dto.LoginRequest;
 import com.example.iknewit.auth.dto.ResetPasswordRequest;
+import com.example.iknewit.auth.social.OAuth2UserInfo;
+import com.example.iknewit.auth.social.SocialAuthService;
 import com.example.iknewit.common.exception.ApiException;
 import com.example.iknewit.common.exception.ErrorCode;
 import com.example.iknewit.user.AuthProvider;
@@ -53,6 +55,8 @@ class LoginConcurrencyTest {
 	JdbcTemplate jdbcTemplate;
 	@Autowired
 	PlatformTransactionManager transactionManager;
+	@Autowired
+	SocialAuthService socialAuthService;
 
 	private final List<String> createdUserIds = new ArrayList<>();
 
@@ -247,6 +251,53 @@ class LoginConcurrencyTest {
 			release.countDown();
 			holding.get(10, TimeUnit.SECONDS);
 			assertThat(refreshing.get(10, TimeUnit.SECONDS)).isNotNull();
+		} finally {
+			release.countDown();
+			pool.shutdownNow();
+		}
+	}
+
+	@Test
+	void 소셜_로그인은_사용자_행_잠금이_풀릴_때까지_기다린다() throws Exception {
+		// 소셜 로그인도 로그인·갱신과 같은 잠금으로 직렬화되어야 단일 디바이스 정책이 동시 요청에서도 지켜진다
+		String providerId = "google-race-" + UUID.randomUUID();
+		User user = userRepository.saveAndFlush(User.builder()
+			.email("social-race-" + UUID.randomUUID() + "@example.com")
+			.nickname("소셜경쟁")
+			.provider(AuthProvider.GOOGLE)
+			.providerId(providerId)
+			.build());
+		createdUserIds.add(user.getId());
+		OAuth2UserInfo info = new OAuth2UserInfo() {
+			public AuthProvider provider() { return AuthProvider.GOOGLE; }
+			public String providerId() { return providerId; }
+			public String email() { return user.getEmail(); }
+			public boolean emailVerified() { return true; }
+			public String displayName() { return "소셜경쟁"; }
+		};
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		try {
+			Future<?> holding = pool.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+				userRepository.findByEmailForUpdate(user.getEmail());
+				locked.countDown();
+				try {
+					release.await(20, TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}));
+			assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+			Future<AuthResult> loggingIn = pool.submit(() -> socialAuthService.loginOrSignup(info));
+			sleep(1000);
+			assertThat(loggingIn.isDone()).as("잠금이 풀리기 전에는 소셜 로그인이 끝나면 안 됨").isFalse();
+
+			release.countDown();
+			holding.get(10, TimeUnit.SECONDS);
+			assertThat(loggingIn.get(10, TimeUnit.SECONDS)).isNotNull();
+			assertThat(refreshTokenRows(user.getId())).isEqualTo(1);
 		} finally {
 			release.countDown();
 			pool.shutdownNow();
