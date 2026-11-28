@@ -89,17 +89,23 @@ public class AuthRateLimiter {
 		return new Window(clock.instant(), new AtomicInteger());
 	}
 
-	// 윈도우가 끝날 때까지 남은 시간(초). 올림하고 최소 1초 (0초면 "바로 다시 시도"로 오해하고 또 차단될 수 있음)
+	// 윈도우가 끝날 때까지 남은 시간(초)
 	private long retryAfterSeconds(Window window, Duration windowLength) {
-		Duration remaining = Duration.between(clock.instant(), window.startedAt().plus(windowLength));
-		return Math.max(1, (remaining.toMillis() + 999) / 1000);
+		return ceilSeconds(Duration.between(clock.instant(), window.startedAt().plus(windowLength)));
+	}
+
+	// 초 단위로 올림하고 최소 1초 (0초면 "바로 다시 시도"로 오해하고 또 차단될 수 있음).
+	// 밀리초로 먼저 자르면 1.0005초가 1초로 계산되므로 초와 나노초 잔여분을 그대로 쓴다
+	private static long ceilSeconds(Duration remaining) {
+		long seconds = remaining.getSeconds() + (remaining.getNano() > 0 ? 1 : 0);
+		return Math.max(1, seconds);
 	}
 
 	public void checkLogin(String ip, String email) {
 		FailureRecord record = failures.getIfPresent(key(ip, email));
 		if (record != null && record.count() >= properties.loginMaxFailures()) {
 			Duration remaining = Duration.between(clock.instant(), record.lastFailureAt().plus(properties.loginBlockDuration()));
-			long seconds = Math.max(1, (remaining.toMillis() + 999) / 1000);
+			long seconds = ceilSeconds(remaining);
 			long minutes = (seconds + 59) / 60;
 			throw new ApiException(ErrorCode.TOO_MANY_REQUESTS,
 				"로그인 시도가 너무 많습니다. " + minutes + "분 후 다시 시도해주세요.", seconds);

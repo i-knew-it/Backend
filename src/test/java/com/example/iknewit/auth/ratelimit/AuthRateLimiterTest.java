@@ -233,6 +233,39 @@ class AuthRateLimiterTest {
 	}
 
 	@Test
+	void Retry_After_올림은_1밀리초_미만의_잔여분도_반영한다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		// 남은 시간 1.2초 → 2초
+		clock.advance(Duration.ofHours(1).minusMillis(1200));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(2L);
+
+		// 남은 시간 1.0005초(1초 + 500마이크로초) → 밀리초로 자르면 1초가 되지만 올림하면 2초
+		clock.advance(Duration.ofMillis(199).plusNanos(500_000));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(2L);
+
+		// 남은 시간 정확히 1초 → 1초
+		clock.advance(Duration.ofNanos(500_000));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(1L);
+
+		// 남은 시간 1나노초 → 최소 1초
+		clock.advance(Duration.ofSeconds(1).minusNanos(1));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(1L);
+	}
+
+	@Test
+	void 로그인_차단의_Retry_After도_1밀리초_미만의_잔여분을_올림한다() {
+		fail(5);
+
+		// 차단 시간 15분 중 남은 시간이 1.0005초가 되는 시점
+		clock.advance(Duration.ofMinutes(15).minusMillis(1000).minusNanos(500_000));
+		assertThatThrownBy(() -> limiter.checkLogin(IP, EMAIL))
+			.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getRetryAfterSeconds()).isEqualTo(2L));
+	}
+
+	@Test
 	void 차단된_요청을_계속_보내도_윈도우가_늘어나지_않는다() {
 		for (int i = 0; i < 3; i++) {
 			limiter.checkPasswordResetRequest(EMAIL);
