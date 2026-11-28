@@ -26,16 +26,21 @@ import org.springframework.stereotype.Component;
 public class AuthRateLimiter {
 
 	private static final long MAX_ENTRIES = 100_000; // 메모리 고갈 방지
-	private static final long IP_WINDOW_RETRY_SECONDS = 60;
+	private static final Duration IP_WINDOW = Duration.ofMinutes(1);
 
 	private record FailureRecord(int count, Instant lastFailureAt) {
+	}
+
+	// 고정 윈도우 카운터. 차단 응답의 Retry-After를 "윈도우가 끝날 때까지 남은 시간"으로 계산하려고 시작 시각을 함께 둔다.
+	// 횟수를 올리는 것은 캐시 쓰기가 아니라서 조회만으로 윈도우(만료 시각)가 늘어나지 않는다
+	private record Window(Instant startedAt, AtomicInteger count) {
 	}
 
 	private final RateLimitProperties properties;
 	private final Clock clock;
 	private final Cache<String, FailureRecord> failures;
-	private final Cache<String, AtomicInteger> ipCounters;
-	private final Cache<String, AtomicInteger> passwordResetCounters;
+	private final Cache<String, Window> ipCounters;
+	private final Cache<String, Window> passwordResetCounters;
 
 	@Autowired
 	public AuthRateLimiter(RateLimitProperties properties) {
@@ -52,17 +57,17 @@ public class AuthRateLimiter {
 			.expireAfterWrite(properties.loginBlockDuration()).maximumSize(MAX_ENTRIES).build();
 		// 첫 요청 시각부터 1분간 집계하는 고정 윈도우
 		this.ipCounters = Caffeine.newBuilder().ticker(ticker)
-			.expireAfterWrite(Duration.ofMinutes(1)).maximumSize(MAX_ENTRIES).build();
+			.expireAfterWrite(IP_WINDOW).maximumSize(MAX_ENTRIES).build();
 		// 이메일별 재설정 요청 횟수 (첫 요청 시각부터 고정 윈도우)
 		this.passwordResetCounters = Caffeine.newBuilder().ticker(ticker)
 			.expireAfterWrite(properties.passwordResetWindow()).maximumSize(MAX_ENTRIES).build();
 	}
 
 	public void checkIp(String ip) {
-		int count = ipCounters.get(ip, key -> new AtomicInteger()).incrementAndGet();
-		if (count > properties.ipMaxPerMinute()) {
+		Window window = ipCounters.get(ip, key -> newWindow());
+		if (window.count().incrementAndGet() > properties.ipMaxPerMinute()) {
 			throw new ApiException(ErrorCode.TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_REQUESTS.getMessage(),
-				IP_WINDOW_RETRY_SECONDS);
+				retryAfterSeconds(window, IP_WINDOW));
 		}
 	}
 
@@ -72,12 +77,22 @@ public class AuthRateLimiter {
 	 * 429 여부로 가입 여부를 알아낼 수 있기 때문이다.
 	 */
 	public void checkPasswordResetRequest(String email) {
-		int count = passwordResetCounters.get(Emails.normalize(email), key -> new AtomicInteger()).incrementAndGet();
-		if (count > properties.passwordResetMaxPerHour()) {
-			long seconds = properties.passwordResetWindow().toSeconds();
+		Window window = passwordResetCounters.get(Emails.normalize(email), key -> newWindow());
+		if (window.count().incrementAndGet() > properties.passwordResetMaxPerHour()) {
 			throw new ApiException(ErrorCode.TOO_MANY_REQUESTS,
-				"재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.", seconds);
+				"재설정 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+				retryAfterSeconds(window, properties.passwordResetWindow()));
 		}
+	}
+
+	private Window newWindow() {
+		return new Window(clock.instant(), new AtomicInteger());
+	}
+
+	// 윈도우가 끝날 때까지 남은 시간(초). 올림하고 최소 1초 (0초면 "바로 다시 시도"로 오해하고 또 차단될 수 있음)
+	private long retryAfterSeconds(Window window, Duration windowLength) {
+		Duration remaining = Duration.between(clock.instant(), window.startedAt().plus(windowLength));
+		return Math.max(1, (remaining.toMillis() + 999) / 1000);
 	}
 
 	public void checkLogin(String ip, String email) {

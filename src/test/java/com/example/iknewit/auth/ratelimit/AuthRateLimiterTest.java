@@ -179,6 +179,90 @@ class AuthRateLimiterTest {
 		assertThatCode(() -> limiter.checkPasswordResetRequest("other@example.com")).doesNotThrowAnyException();
 	}
 
+	// ---------- Retry-After는 "윈도우가 끝날 때까지 남은 시간"이어야 한다 ----------
+
+	private long retryAfterOfBlockedResetRequest() {
+		try {
+			limiter.checkPasswordResetRequest(EMAIL);
+		} catch (ApiException e) {
+			return e.getRetryAfterSeconds();
+		}
+		throw new AssertionError("차단되어야 하는데 통과했다");
+	}
+
+	private long retryAfterOfBlockedIp() {
+		try {
+			limiter.checkIp(IP);
+		} catch (ApiException e) {
+			return e.getRetryAfterSeconds();
+		}
+		throw new AssertionError("차단되어야 하는데 통과했다");
+	}
+
+	@Test
+	void 재설정_요청의_Retry_After는_윈도우_전체가_아니라_남은_시간이다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		// 한도를 넘긴 직후: 윈도우가 막 시작된 상태라 1시간
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(3600L);
+
+		// 30분 뒤: 남은 시간은 30분
+		clock.advance(Duration.ofMinutes(30));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(1800L);
+
+		// 만료 1초 전: 1초
+		clock.advance(Duration.ofMinutes(29).plusSeconds(59));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(1L);
+	}
+
+	@Test
+	void Retry_After는_초_단위로_올림하고_최소_1초다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		// 남은 시간 1.2초 → 올림해서 2초
+		clock.advance(Duration.ofHours(1).minusMillis(1200));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(2L);
+
+		// 남은 시간 0.5초 → 올림해서 1초 (0초로 내려가면 바로 다시 시도해서 또 차단된다)
+		clock.advance(Duration.ofMillis(700));
+		assertThat(retryAfterOfBlockedResetRequest()).isEqualTo(1L);
+	}
+
+	@Test
+	void 차단된_요청을_계속_보내도_윈도우가_늘어나지_않는다() {
+		for (int i = 0; i < 3; i++) {
+			limiter.checkPasswordResetRequest(EMAIL);
+		}
+
+		clock.advance(Duration.ofMinutes(10));
+		long first = retryAfterOfBlockedResetRequest();
+		clock.advance(Duration.ofMinutes(10));
+		long second = retryAfterOfBlockedResetRequest();
+
+		// 차단되어 조회만 했을 뿐이므로 만료 시각은 처음 시작 시각 기준 그대로 줄어든다
+		assertThat(first).isEqualTo(3000L);
+		assertThat(second).isEqualTo(2400L);
+	}
+
+	@Test
+	void IP_제한의_Retry_After도_남은_시간이다() {
+		for (int i = 0; i < 20; i++) {
+			limiter.checkIp(IP);
+		}
+
+		assertThat(retryAfterOfBlockedIp()).isEqualTo(60L);
+
+		clock.advance(Duration.ofSeconds(25));
+		assertThat(retryAfterOfBlockedIp()).isEqualTo(35L);
+
+		clock.advance(Duration.ofSeconds(34));
+		assertThat(retryAfterOfBlockedIp()).isEqualTo(1L);
+	}
+
 	@Test
 	void 재설정_요청_횟수는_1시간이_지나면_초기화된다() {
 		for (int i = 0; i < 4; i++) {

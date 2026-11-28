@@ -75,7 +75,13 @@ public class AuthService {
 		rateLimiter.checkIp(clientIp);
 		rateLimiter.checkLogin(clientIp, email);
 
-		User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElse(null);
+		// 사용자 행을 잠그고 조회한다. 비밀번호를 확인하는 동안(bcrypt 약 0.1초) 같은 사용자의 비밀번호 재설정이나
+		// 다른 로그인이 끼어들지 못하게 해서 두 가지 문제를 막는다.
+		//  1) 재설정 직전에 옛 비밀번호 해시를 읽은 로그인이 재설정이 끝난 뒤 세션을 만들어, 재설정으로 모든 기기를
+		//     로그아웃시킨 효과가 깨지는 문제
+		//  2) 같은 사용자의 로그인이 동시에 와서 Refresh Token이 여러 개 남는(단일 디바이스 정책 위반) 문제
+		// 가입되지 않은 이메일은 잠글 행이 없어 그대로 진행된다 (응답은 같다)
+		User user = userRepository.findByEmailForUpdate(email).orElse(null);
 		// 소셜 전용 계정(password_hash 없음)도 같은 방식으로 실패 처리
 		boolean hasPassword = user != null && user.getPasswordHash() != null;
 		boolean matches = passwordEncoder.matches(request.password(),

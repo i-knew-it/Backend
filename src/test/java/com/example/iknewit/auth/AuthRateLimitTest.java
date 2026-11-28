@@ -127,7 +127,8 @@ class AuthRateLimitTest {
 
 		MvcResult blocked = login(uniqueEmail(), "Wrong-password1!", ip);
 		assertThat(blocked.getResponse().getStatus()).isEqualTo(429);
-		assertThat(blocked.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("60");
+		// 윈도우가 끝날 때까지 남은 시간이다 (앞선 20번의 시도에 걸린 시간만큼 60초보다 조금 작을 수 있다)
+		assertThat(Long.parseLong(blocked.getResponse().getHeader(HttpHeaders.RETRY_AFTER))).isBetween(1L, 60L);
 		// 가입도 같은 IP 제한을 공유한다
 		assertThat(signup(uniqueEmail(), ip).getResponse().getStatus()).isEqualTo(429);
 	}
