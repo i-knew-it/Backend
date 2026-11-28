@@ -75,23 +75,31 @@ public class AuthService {
 		rateLimiter.checkIp(clientIp);
 		rateLimiter.checkLogin(clientIp, email);
 
-		// 사용자 행을 잠그고 조회한다. 비밀번호를 확인하는 동안(bcrypt 약 0.1초) 같은 사용자의 비밀번호 재설정이나
-		// 다른 로그인이 끼어들지 못하게 해서 두 가지 문제를 막는다.
-		//  1) 재설정 직전에 옛 비밀번호 해시를 읽은 로그인이 재설정이 끝난 뒤 세션을 만들어, 재설정으로 모든 기기를
-		//     로그아웃시킨 효과가 깨지는 문제
-		//  2) 같은 사용자의 로그인이 동시에 와서 Refresh Token이 여러 개 남는(단일 디바이스 정책 위반) 문제
-		// 가입되지 않은 이메일은 잠글 행이 없어 그대로 진행된다 (응답은 같다)
+		// 1단계: 잠금 없이 비밀번호를 확인한다. 틀린 요청은 여기서 끝나므로 잠금을 잡지 않는다
+		// (오답 로그인을 반복해서 남의 계정의 정상 로그인·재설정을 막거나 DB 커넥션을 붙잡는 것을 방지).
+		// 소셜 전용 계정(해시 없음)과 가입되지 않은 이메일은 더미 해시로 비교해 응답 시간과 결과가 같다
+		String storedHash = userRepository.findPasswordHashByEmail(email).orElse(null);
+		boolean matches = passwordEncoder.matches(request.password(), storedHash != null ? storedHash : dummyPasswordHash);
+		if (storedHash == null || !matches) {
+			throw failLogin(clientIp, email);
+		}
+
+		// 2단계: 맞은 요청만 사용자 행을 잠그고 최신 해시로 다시 확인한 뒤 같은 트랜잭션에서 세션을 만든다.
+		// 1단계와 잠금 사이에 비밀번호 재설정이 끝났을 수 있고, 같은 사용자의 로그인이 동시에 올 수 있어서다.
+		//  1) 옛 해시로 통과한 로그인이 재설정 뒤에 세션을 만들어 "재설정하면 모든 기기 로그아웃"이 깨지는 문제
+		//  2) 동시 로그인으로 Refresh Token이 여러 개 남는(단일 디바이스 정책 위반) 문제
 		User user = userRepository.findByEmailForUpdate(email).orElse(null);
-		// 소셜 전용 계정(password_hash 없음)도 같은 방식으로 실패 처리
-		boolean hasPassword = user != null && user.getPasswordHash() != null;
-		boolean matches = passwordEncoder.matches(request.password(),
-			hasPassword ? user.getPasswordHash() : dummyPasswordHash);
-		if (!hasPassword || !matches) {
-			rateLimiter.recordFailure(clientIp, email);
-			throw new ApiException(ErrorCode.INVALID_CREDENTIALS);
+		if (user == null || user.getPasswordHash() == null
+			|| !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+			throw failLogin(clientIp, email);
 		}
 		rateLimiter.recordSuccess(clientIp, email);
 		return startSession(user);
+	}
+
+	private ApiException failLogin(String clientIp, String email) {
+		rateLimiter.recordFailure(clientIp, email);
+		return new ApiException(ErrorCode.INVALID_CREDENTIALS);
 	}
 
 	/**

@@ -29,6 +29,14 @@ public interface UserRepository extends JpaRepository<User, String> {
 	@Query("select u from User u where u.email = :email and u.deletedAt is null")
 	Optional<User> findByEmailForUpdate(@Param("email") String email);
 
+	/**
+	 * 잠금 없이 비밀번호 해시 문자열만 조회한다. 로그인의 1차 비밀번호 확인용이다.
+	 * 엔티티가 아니라 값만 읽으므로 영속성 컨텍스트에 User가 남지 않아, 뒤이은 잠금 조회가 항상 DB의 최신 값을 읽는다.
+	 * 계정이 없거나 비밀번호가 없는(소셜 전용) 계정이면 비어 있다.
+	 */
+	@Query("select u.passwordHash from User u where u.email = :email and u.deletedAt is null")
+	Optional<String> findPasswordHashByEmail(@Param("email") String email);
+
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select u from User u where u.id = :id and u.deletedAt is null")
 	Optional<User> findByIdForUpdate(@Param("id") String id);

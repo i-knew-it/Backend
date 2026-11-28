@@ -25,6 +25,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 로그인과 다른 인증 작업이 동시에 올 때의 경쟁 상태 검증. 서로 다른 트랜잭션이 필요하므로 @Transactional을 쓰지 않고,
@@ -49,6 +51,8 @@ class LoginConcurrencyTest {
 	PasswordEncoder passwordEncoder;
 	@Autowired
 	JdbcTemplate jdbcTemplate;
+	@Autowired
+	PlatformTransactionManager transactionManager;
 
 	private final List<String> createdUserIds = new ArrayList<>();
 
@@ -212,6 +216,46 @@ class LoginConcurrencyTest {
 			}
 			// 재설정이 끝난 뒤에는 갱신이 먼저 끝났더라도 그 세션까지 모두 삭제되어야 한다
 			assertThat(refreshTokenRows(user.getId())).as("%d번째 라운드: 재설정 후 남은 세션", round + 1).isZero();
+		}
+	}
+
+	@Test
+	void 오답_로그인은_사용자_행_잠금을_기다리지_않고_바로_거절된다() throws Exception {
+		User user = createUser();
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		ExecutorService holder = Executors.newSingleThreadExecutor();
+		try {
+			// 다른 트랜잭션이 사용자 행 잠금을 쥐고 있는 상황
+			Future<?> holding = holder.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+				userRepository.findByEmailForUpdate(user.getEmail());
+				locked.countDown();
+				try {
+					release.await(20, TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}));
+			assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+			long startedAt = System.nanoTime();
+			Throwable error = null;
+			try {
+				authService.login(new LoginRequest(user.getEmail(), "Wrong-password1!"), "10.12.0.1");
+			} catch (Throwable t) {
+				error = t;
+			}
+			long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+			assertThat(error).isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_CREDENTIALS));
+			// 잠금이 풀리길 기다렸다면 release 전까지(수 초) 끝나지 않았을 것이다
+			assertThat(elapsedMillis).as("오답 로그인 처리 시간(ms)").isLessThan(3000);
+			release.countDown();
+			holding.get(10, TimeUnit.SECONDS);
+		} finally {
+			release.countDown();
+			holder.shutdownNow();
 		}
 	}
 
