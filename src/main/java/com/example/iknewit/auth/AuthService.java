@@ -125,7 +125,11 @@ public class AuthService {
 		if (refreshToken == null || refreshToken.isBlank()) {
 			throw new ApiException(ErrorCode.TOKEN_INVALID);
 		}
+		// 서명 검증을 통과한 토큰만 여기까지 온다. 로그인·재설정과 같은 순서("사용자 행 → 토큰 행")로 사용자 행을 먼저 잠근다.
+		// 잠그지 않으면 갱신이 새 토큰을 넣는 도중에 끼어든 로그인의 "전체 삭제"가 그 새 토큰을 보지 못해(삭제 시작 시점의
+		// 스냅샷 기준) 이전 기기의 토큰이 살아남는다 (단일 디바이스 정책 위반)
 		String userId = jwtProvider.parseUserId(refreshToken, TokenType.REFRESH);
+		userRepository.findByIdForUpdate(userId).orElseThrow(() -> new ApiException(ErrorCode.TOKEN_INVALID));
 		String tokenHash = TokenHasher.sha256(refreshToken);
 		Instant now = Instant.now();
 

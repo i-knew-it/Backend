@@ -220,6 +220,40 @@ class LoginConcurrencyTest {
 	}
 
 	@Test
+	void 토큰_갱신은_사용자_행_잠금이_풀릴_때까지_기다린다() throws Exception {
+		// 갱신이 사용자 행을 잠그지 않으면 로그인의 "전체 삭제"가 갱신이 새로 넣은 토큰을 지우지 못해 이전 기기 토큰이 남는다.
+		// 갱신이 로그인·재설정과 같은 잠금으로 직렬화되는지 확인한다 (로그인과 갱신이 겹치는 순간은 타이밍이 짧아 직접 만들 수 없다)
+		User user = createUser();
+		AuthResult session = authService.login(new LoginRequest(user.getEmail(), OLD_PASSWORD), "10.13.0.0");
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		try {
+			Future<?> holding = pool.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+				userRepository.findByEmailForUpdate(user.getEmail());
+				locked.countDown();
+				try {
+					release.await(20, TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}));
+			assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+			Future<AuthResult> refreshing = pool.submit(() -> authService.refresh(session.refreshToken()));
+			sleep(1000);
+			assertThat(refreshing.isDone()).as("잠금이 풀리기 전에는 갱신이 끝나면 안 됨").isFalse();
+
+			release.countDown();
+			holding.get(10, TimeUnit.SECONDS);
+			assertThat(refreshing.get(10, TimeUnit.SECONDS)).isNotNull();
+		} finally {
+			release.countDown();
+			pool.shutdownNow();
+		}
+	}
+
+	@Test
 	void 오답_로그인은_사용자_행_잠금을_기다리지_않고_바로_거절된다() throws Exception {
 		User user = createUser();
 		CountDownLatch locked = new CountDownLatch(1);
