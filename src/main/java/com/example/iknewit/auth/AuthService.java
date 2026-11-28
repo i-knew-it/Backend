@@ -75,17 +75,31 @@ public class AuthService {
 		rateLimiter.checkIp(clientIp);
 		rateLimiter.checkLogin(clientIp, email);
 
-		User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElse(null);
-		// 소셜 전용 계정(password_hash 없음)도 같은 방식으로 실패 처리
-		boolean hasPassword = user != null && user.getPasswordHash() != null;
-		boolean matches = passwordEncoder.matches(request.password(),
-			hasPassword ? user.getPasswordHash() : dummyPasswordHash);
-		if (!hasPassword || !matches) {
-			rateLimiter.recordFailure(clientIp, email);
-			throw new ApiException(ErrorCode.INVALID_CREDENTIALS);
+		// 1단계: 잠금 없이 비밀번호를 확인한다. 틀린 요청은 여기서 끝나므로 잠금을 잡지 않는다
+		// (오답 로그인을 반복해서 남의 계정의 정상 로그인·재설정을 막거나 DB 커넥션을 붙잡는 것을 방지).
+		// 소셜 전용 계정(해시 없음)과 가입되지 않은 이메일은 더미 해시로 비교해 응답 시간과 결과가 같다
+		String storedHash = userRepository.findPasswordHashByEmail(email).orElse(null);
+		boolean matches = passwordEncoder.matches(request.password(), storedHash != null ? storedHash : dummyPasswordHash);
+		if (storedHash == null || !matches) {
+			throw failLogin(clientIp, email);
+		}
+
+		// 2단계: 맞은 요청만 사용자 행을 잠그고 최신 해시로 다시 확인한 뒤 같은 트랜잭션에서 세션을 만든다.
+		// 1단계와 잠금 사이에 비밀번호 재설정이 끝났을 수 있고, 같은 사용자의 로그인이 동시에 올 수 있어서다.
+		//  1) 옛 해시로 통과한 로그인이 재설정 뒤에 세션을 만들어 "재설정하면 모든 기기 로그아웃"이 깨지는 문제
+		//  2) 동시 로그인으로 Refresh Token이 여러 개 남는(단일 디바이스 정책 위반) 문제
+		User user = userRepository.findByEmailForUpdate(email).orElse(null);
+		if (user == null || user.getPasswordHash() == null
+			|| !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+			throw failLogin(clientIp, email);
 		}
 		rateLimiter.recordSuccess(clientIp, email);
 		return startSession(user);
+	}
+
+	private ApiException failLogin(String clientIp, String email) {
+		rateLimiter.recordFailure(clientIp, email);
+		return new ApiException(ErrorCode.INVALID_CREDENTIALS);
 	}
 
 	/**
@@ -111,9 +125,15 @@ public class AuthService {
 		if (refreshToken == null || refreshToken.isBlank()) {
 			throw new ApiException(ErrorCode.TOKEN_INVALID);
 		}
+		// 서명 검증을 통과한 토큰만 여기까지 온다. 로그인·재설정과 같은 순서("사용자 행 → 토큰 행")로 사용자 행을 먼저 잠근다.
+		// 잠그지 않으면 갱신이 새 토큰을 넣는 도중에 끼어든 로그인의 "전체 삭제"가 그 새 토큰을 보지 못해(삭제 시작 시점의
+		// 스냅샷 기준) 이전 기기의 토큰이 살아남는다 (단일 디바이스 정책 위반)
 		String userId = jwtProvider.parseUserId(refreshToken, TokenType.REFRESH);
-		String tokenHash = TokenHasher.sha256(refreshToken);
+		// 기준 시각은 잠금을 기다리기 전에 읽는다. 대기한 시간이 재사용 유예(기본 10초) 판정에 더해지면, 유예 안에 도착한
+		// 정상 요청이 탈취로 오인되어 사용자의 모든 토큰이 삭제될 수 있다 (요청이 도착한 시각 기준으로 판정)
 		Instant now = Instant.now();
+		userRepository.findByIdForUpdate(userId).orElseThrow(() -> new ApiException(ErrorCode.TOKEN_INVALID));
+		String tokenHash = TokenHasher.sha256(refreshToken);
 
 		RefreshToken stored = refreshTokenRepository.findByTokenHash(tokenHash)
 			.orElseThrow(() -> new ApiException(ErrorCode.TOKEN_INVALID));

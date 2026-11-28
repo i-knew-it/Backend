@@ -214,7 +214,8 @@ class PasswordResetControllerTest {
 
 		assertThat(blocked.getResponse().getStatus()).isEqualTo(429);
 		assertThat(errorCodeOf(blocked)).isEqualTo("TOO_MANY_REQUESTS");
-		assertThat(blocked.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("3600");
+		// 윈도우가 끝날 때까지 남은 시간이다 (방금 시작한 윈도우라 1시간에 가깝다. 정확한 값은 시계를 조작하는 AuthRateLimiterTest에서 검증)
+		assertThat(Long.parseLong(blocked.getResponse().getHeader(HttpHeaders.RETRY_AFTER))).isBetween(3500L, 3600L);
 	}
 
 	@Test

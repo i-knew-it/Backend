@@ -223,7 +223,7 @@ GET    /admin/ai-usage
 | 401 | TOKEN_INVALID | 위조·형식 오류·용도 불일치·폐기된 토큰 |
 | 401 | INVALID_CREDENTIALS | 이메일 없음 또는 비밀번호 불일치 |
 | 401 | UNAUTHORIZED | 토큰 없이 인증 필요 경로 접근 |
-| 429 | TOO_MANY_REQUESTS | 로그인 연속 실패(5회) 또는 IP당 분당 20회 초과. `Retry-After` 헤더(초) 제공 |
+| 429 | TOO_MANY_REQUESTS | 로그인 연속 실패(5회) 또는 IP당 분당 20회 초과. `Retry-After` 헤더(차단이 풀릴 때까지 남은 시간, 초, 올림) 제공 |
 | 403 | FORBIDDEN | 타계정 리소스 접근 |
 | 409 | EMAIL_ALREADY_EXISTS | 이메일 중복 |
 | 409 | ALREADY_ANSWERED_TODAY | 오늘 이미 제출 |
@@ -294,3 +294,4 @@ GET    /admin/ai-usage
 4. **같은 concept_tag 스터디 카드는 1개만** (UPSERT로 처리)
 5. **알림 중복 발송 없음** (하루 1회 발송 보장)
 6. **API 키는 환경변수로 관리** (코드에 직접 넣지 않음)
+7. **같은 사용자의 인증 작업은 사용자 행을 먼저 잠근다**: 로그인, 토큰 갱신(`refresh`), 소셜 로그인(`SocialAuthService`), 비밀번호 재설정, 재설정 메일 요청은 `SELECT ... FOR UPDATE`(`findByEmailForUpdate`, `findByIdForUpdate`)로 사용자 행을 잠근 뒤 토큰 테이블을 건드린다. 단, 로그인은 오답 요청이 잠금을 잡지 않도록 잠금 없이(해시 문자열만 조회) 먼저 비밀번호를 확인하고, 맞은 경우에만 잠근 뒤 최신 해시로 다시 확인한다. 잠금 순서는 항상 "사용자 행 → 토큰 행"이어야 서로 기다리는 교착이 생기지 않는다. (Hibernate는 PostgreSQL에서 `for no key update`를 써서 외래키 검사와 충돌하지 않으므로 교착은 없지만, 갱신이 잠그지 않으면 로그인의 "전체 삭제"가 갱신이 새로 넣은 토큰을 지우지 못해 단일 디바이스 정책이 깨지므로 `refresh`도 잠근다)

@@ -60,6 +60,10 @@ public class SocialAuthService {
 				throw new ApiException(ErrorCode.OAUTH_FAILED);
 			}
 		}
+		// 다른 인증 작업과 같은 순서("사용자 행 → 토큰 행")로 사용자 행을 먼저 잠근다. 잠그지 않으면 같은 사용자의
+		// 토큰 갱신 등과 겹칠 때 startSession의 "전체 삭제"가 그쪽이 새로 넣은 토큰을 지우지 못해 단일 디바이스 정책이 깨진다.
+		// 잠금 조회가 비면 그 사이 탈퇴 처리된 계정이므로 실패시킨다
+		userRepository.findByIdForUpdate(user.getId()).orElseThrow(() -> new ApiException(ErrorCode.OAUTH_FAILED));
 		return authService.startSession(user);
 	}
 
