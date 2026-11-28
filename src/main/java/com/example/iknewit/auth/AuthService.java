@@ -129,9 +129,11 @@ public class AuthService {
 		// 잠그지 않으면 갱신이 새 토큰을 넣는 도중에 끼어든 로그인의 "전체 삭제"가 그 새 토큰을 보지 못해(삭제 시작 시점의
 		// 스냅샷 기준) 이전 기기의 토큰이 살아남는다 (단일 디바이스 정책 위반)
 		String userId = jwtProvider.parseUserId(refreshToken, TokenType.REFRESH);
+		// 기준 시각은 잠금을 기다리기 전에 읽는다. 대기한 시간이 재사용 유예(기본 10초) 판정에 더해지면, 유예 안에 도착한
+		// 정상 요청이 탈취로 오인되어 사용자의 모든 토큰이 삭제될 수 있다 (요청이 도착한 시각 기준으로 판정)
+		Instant now = Instant.now();
 		userRepository.findByIdForUpdate(userId).orElseThrow(() -> new ApiException(ErrorCode.TOKEN_INVALID));
 		String tokenHash = TokenHasher.sha256(refreshToken);
-		Instant now = Instant.now();
 
 		RefreshToken stored = refreshTokenRepository.findByTokenHash(tokenHash)
 			.orElseThrow(() -> new ApiException(ErrorCode.TOKEN_INVALID));

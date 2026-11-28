@@ -258,6 +258,44 @@ class LoginConcurrencyTest {
 	}
 
 	@Test
+	void 갱신이_잠금을_기다린_시간은_재사용_유예_판정에_반영되지_않는다() throws Exception {
+		// 폐기 후 9.5초에 도착한 요청이 잠금을 1초 기다려도(유예 10초) 도착 시각 기준으로 판정되어 허용되어야 한다.
+		// 대기가 끝난 시각으로 판정하면 10.5초로 보여 탈취로 오인하고 사용자의 모든 토큰을 지운다
+		User user = createUser();
+		AuthResult first = authService.login(new LoginRequest(user.getEmail(), OLD_PASSWORD), "10.14.0.0");
+		authService.refresh(first.refreshToken()); // first 토큰이 폐기된다
+		jdbcTemplate.update("update refresh_tokens set revoked_at = now() - interval '9500 milliseconds' "
+			+ "where user_id = ? and revoked_at is not null", user.getId());
+
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		try {
+			Future<?> holding = pool.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+				userRepository.findByEmailForUpdate(user.getEmail());
+				locked.countDown();
+				try {
+					release.await(20, TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}));
+			assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+			Future<AuthResult> reuse = pool.submit(() -> authService.refresh(first.refreshToken()));
+			sleep(1000);
+			release.countDown();
+			holding.get(10, TimeUnit.SECONDS);
+
+			assertThat(reuse.get(10, TimeUnit.SECONDS)).as("유예 안에 도착한 요청은 허용").isNotNull();
+			assertThat(refreshTokenRows(user.getId())).as("탈취로 오인해 전체 삭제되면 안 됨").isGreaterThan(0);
+		} finally {
+			release.countDown();
+			pool.shutdownNow();
+		}
+	}
+
+	@Test
 	void 소셜_로그인은_사용자_행_잠금이_풀릴_때까지_기다린다() throws Exception {
 		// 소셜 로그인도 로그인·갱신과 같은 잠금으로 직렬화되어야 단일 디바이스 정책이 동시 요청에서도 지켜진다
 		String providerId = "google-race-" + UUID.randomUUID();
